@@ -29,7 +29,7 @@ function App() {
               <Route path="/write" element={<ArticleEditor />} />
               <Route path="/edit/:id" element={<ArticleEditor />} />
               <Route path="/search" element={<Search />} />
-              <Route path="/admin" element={<Admin />} />
+              <Route path="/admin/*" element={<Admin />} />
             </Routes>
           </div>
         </main>

@@ -14,8 +14,13 @@ function ArticleDetail() {
 
   useEffect(() => {
     fetchArticle();
-    fetchComments();
   }, [slug]);
+
+  useEffect(() => {
+    if (article?.id) {
+      fetchComments();
+    }
+  }, [article?.id]);
 
   const fetchArticle = async () => {
     try {
@@ -30,7 +35,7 @@ function ArticleDetail() {
 
   const fetchComments = async () => {
     try {
-      const res = await axios.get('/api/comments', { params: { article_id: article?.id } });
+      const res = await axios.get('/api/comments', { params: { article_id: article.id } });
       setComments(res.data);
     } catch (err) {
       console.error(err);

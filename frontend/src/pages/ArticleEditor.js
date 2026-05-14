@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import axios from 'axios';
 
 function ArticleEditor() {
@@ -14,6 +16,9 @@ function ArticleEditor() {
     status: 'draft'
   });
   const [categories, setCategories] = useState([]);
+  const [tags, setTags] = useState([]);
+  const [selectedTags, setSelectedTags] = useState([]);
+  const [newTagName, setNewTagName] = useState('');
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
   const [preview, setPreview] = useState(false);
@@ -58,6 +63,7 @@ function ArticleEditor() {
       fetchDraft();
     }
     fetchCategories();
+    fetchTags();
   }, [id, fetchDraft]);
 
   useEffect(() => {
@@ -80,6 +86,38 @@ function ArticleEditor() {
     try {
       const res = await axios.get('/api/categories');
       setCategories(res.data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchTags = async () => {
+    try {
+      const res = await axios.get('/api/tags');
+      setTags(res.data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const toggleTag = (tagId) => {
+    setSelectedTags(prev => 
+      prev.includes(tagId) 
+        ? prev.filter(id => id !== tagId)
+        : [...prev, tagId]
+    );
+  };
+
+  const createTag = async () => {
+    if (!newTagName.trim()) return;
+    try {
+      const res = await axios.post('/api/tags', {
+        name: newTagName,
+        slug: newTagName.toLowerCase().replace(/\s+/g, '-')
+      });
+      setTags(prev => [...prev, res.data]);
+      setSelectedTags(prev => [...prev, res.data.id]);
+      setNewTagName('');
     } catch (err) {
       console.error(err);
     }
@@ -197,6 +235,41 @@ function ArticleEditor() {
           </div>
 
           <div className="form-group">
+            <label>标签</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              {tags.map(tag => (
+                <button
+                  key={tag.id}
+                  type="button"
+                  onClick={() => toggleTag(tag.id)}
+                  style={{
+                    padding: '0.3rem 0.8rem',
+                    borderRadius: '20px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: selectedTags.includes(tag.id) ? '#667eea' : '#e9ecef',
+                    color: selectedTags.includes(tag.id) ? 'white' : '#495057'
+                  }}
+                >
+                  {tag.name}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <input
+                type="text"
+                value={newTagName}
+                onChange={(e) => setNewTagName(e.target.value)}
+                placeholder="输入新标签名称"
+                style={{ flex: 1, padding: '0.5rem', borderRadius: '4px', border: '1px solid #ddd' }}
+              />
+              <button type="button" className="btn btn-secondary" onClick={createTag}>
+                添加标签
+              </button>
+            </div>
+          </div>
+
+          <div className="form-group">
             <label>内容 (Markdown)</label>
             <textarea
               name="content"
@@ -227,7 +300,19 @@ function ArticleEditor() {
         <div className="markdown-content">
           <h1>{formData.title || '无标题'}</h1>
           <hr style={{ margin: '1.5rem 0' }} />
-          {formData.content || '暂无内容'}
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {formData.content || '暂无内容'}
+          </ReactMarkdown>
+          {selectedTags.length > 0 && (
+            <div style={{ marginTop: '1.5rem' }}>
+              <div className="tags">
+                {selectedTags.map(tagId => {
+                  const tag = tags.find(t => t.id === tagId);
+                  return tag ? <span key={tagId} className="tag">{tag.name}</span> : null;
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
