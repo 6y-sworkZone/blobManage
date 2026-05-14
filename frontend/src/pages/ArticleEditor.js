@@ -77,6 +77,9 @@ function ArticleEditor() {
     try {
       const res = await axios.get(`/api/articles/${id}`);
       setFormData(res.data);
+      
+      const tagsRes = await axios.get(`/api/articles/${id}/tags`);
+      setSelectedTags(tagsRes.data.map(tag => tag.id));
     } catch (err) {
       console.error(err);
     }
@@ -131,7 +134,7 @@ function ArticleEditor() {
   const handleSubmit = async (e, status) => {
     e.preventDefault();
     try {
-      const data = { ...formData, status, author_id: 1 };
+      const data = { ...formData, status, author_id: 1, tag_ids: selectedTags };
       if (id) {
         await axios.put(`/api/articles/${id}`, data);
       } else {

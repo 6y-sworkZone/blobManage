@@ -67,6 +67,17 @@ type Draft struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type ArticleRequest struct {
+	Title       string    `json:"title"`
+	Content     string    `json:"content"`
+	Excerpt     string    `json:"excerpt"`
+	Slug        string    `json:"slug"`
+	CategoryID  int       `json:"category_id"`
+	AuthorID    int       `json:"author_id"`
+	Status      string    `json:"status"`
+	TagIDs      []int     `json:"tag_ids"`
+}
+
 func main() {
 	initDB()
 	defer db.Close()
@@ -94,6 +105,7 @@ func main() {
 			articles.PUT("/:id", updateArticle)
 			articles.DELETE("/:id", deleteArticle)
 			articles.GET("/slug/:slug", getArticleBySlug)
+			articles.GET("/:id/tags", getArticleTags)
 		}
 
 		categories := api.Group("/categories")
@@ -215,62 +227,133 @@ func getArticleBySlug(c *gin.Context) {
 }
 
 func createArticle(c *gin.Context) {
-	var a Article
-	if err := c.ShouldBindJSON(&a); err != nil {
+	var req ArticleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if a.Slug == "" {
-		a.Slug = generateSlug(a.Title)
+	if req.Slug == "" {
+		req.Slug = generateSlug(req.Title)
 	}
 	now := time.Now()
-	a.CreatedAt = now
-	a.UpdatedAt = now
-	if a.Status == "published" {
-		a.PublishedAt = now
-	}
 
 	result, err := db.Exec(`INSERT INTO articles (title, content, excerpt, slug, category_id, author_id, status, view_count, created_at, updated_at, published_at) 
 	                        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-		a.Title, a.Content, a.Excerpt, a.Slug, a.CategoryID, a.AuthorID, a.Status, a.CreatedAt, a.UpdatedAt, a.PublishedAt)
+		req.Title, req.Content, req.Excerpt, req.Slug, req.CategoryID, req.AuthorID, req.Status, now, now, now)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	id, _ := result.LastInsertId()
-	a.ID = int(id)
+	articleID, _ := result.LastInsertId()
+
+	for _, tagID := range req.TagIDs {
+		_, err := db.Exec("INSERT INTO article_tags (article_id, tag_id) VALUES (?, ?)", articleID, tagID)
+		if err != nil {
+			log.Printf("Failed to insert article_tag: %v", err)
+		}
+	}
+
+	a := Article{
+		ID:          int(articleID),
+		Title:       req.Title,
+		Content:     req.Content,
+		Excerpt:     req.Excerpt,
+		Slug:        req.Slug,
+		CategoryID:  req.CategoryID,
+		AuthorID:    req.AuthorID,
+		Status:      req.Status,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		PublishedAt: now,
+	}
 	c.JSON(http.StatusCreated, a)
 }
 
 func updateArticle(c *gin.Context) {
 	id := c.Param("id")
-	var a Article
-	if err := c.ShouldBindJSON(&a); err != nil {
+	var req ArticleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	a.UpdatedAt = time.Now()
-	if a.Status == "published" && a.PublishedAt.IsZero() {
-		a.PublishedAt = time.Now()
+	now := time.Now()
+	publishedAt := now
+	if req.Status != "published" {
+		publishedAt = time.Time{}
 	}
 
 	_, err := db.Exec(`UPDATE articles SET title=?, content=?, excerpt=?, slug=?, category_id=?, status=?, updated_at=?, published_at=? WHERE id=?`,
-		a.Title, a.Content, a.Excerpt, a.Slug, a.CategoryID, a.Status, a.UpdatedAt, a.PublishedAt, id)
+		req.Title, req.Content, req.Excerpt, req.Slug, req.CategoryID, req.Status, now, publishedAt, id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	_, err = db.Exec("DELETE FROM article_tags WHERE article_id = ?", id)
+	if err != nil {
+		log.Printf("Failed to delete old article_tags: %v", err)
+	}
+
+	for _, tagID := range req.TagIDs {
+		_, err := db.Exec("INSERT INTO article_tags (article_id, tag_id) VALUES (?, ?)", id, tagID)
+		if err != nil {
+			log.Printf("Failed to insert article_tag: %v", err)
+		}
+	}
+
+	a := Article{
+		ID:          0,
+		Title:       req.Title,
+		Content:     req.Content,
+		Excerpt:     req.Excerpt,
+		Slug:        req.Slug,
+		CategoryID:  req.CategoryID,
+		AuthorID:    req.AuthorID,
+		Status:      req.Status,
+		UpdatedAt:   now,
+		PublishedAt: publishedAt,
 	}
 	c.JSON(http.StatusOK, a)
 }
 
 func deleteArticle(c *gin.Context) {
 	id := c.Param("id")
-	_, err := db.Exec("DELETE FROM articles WHERE id = ?", id)
+	_, err := db.Exec("DELETE FROM article_tags WHERE article_id = ?", id)
+	if err != nil {
+		log.Printf("Failed to delete article_tags: %v", err)
+	}
+	_, err = db.Exec("DELETE FROM articles WHERE id = ?", id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Deleted successfully"})
+}
+
+func getArticleTags(c *gin.Context) {
+	id := c.Param("id")
+	rows, err := db.Query(`
+		SELECT t.id, t.name, t.slug 
+		FROM tags t 
+		INNER JOIN article_tags at ON t.id = at.tag_id 
+		WHERE at.article_id = ?
+	`, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	var tags []Tag
+	for rows.Next() {
+		var t Tag
+		err := rows.Scan(&t.ID, &t.Name, &t.Slug)
+		if err != nil {
+			continue
+		}
+		tags = append(tags, t)
+	}
+	c.JSON(http.StatusOK, tags)
 }
 
 func getCategories(c *gin.Context) {
