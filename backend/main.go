@@ -106,6 +106,7 @@ func main() {
 			articles.DELETE("/:id", deleteArticle)
 			articles.GET("/slug/:slug", getArticleBySlug)
 			articles.GET("/:id/tags", getArticleTags)
+			articles.GET("/tags/batch", getArticleTagsBatch)
 		}
 
 		categories := api.Group("/categories")
@@ -277,12 +278,21 @@ func updateArticle(c *gin.Context) {
 		return
 	}
 	now := time.Now()
-	publishedAt := now
-	if req.Status != "published" {
-		publishedAt = time.Time{}
+
+	var oldStatus string
+	var oldPublishedAt time.Time
+	err := db.QueryRow("SELECT status, published_at FROM articles WHERE id = ?", id).Scan(&oldStatus, &oldPublishedAt)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Article not found"})
+		return
 	}
 
-	_, err := db.Exec(`UPDATE articles SET title=?, content=?, excerpt=?, slug=?, category_id=?, status=?, updated_at=?, published_at=? WHERE id=?`,
+	publishedAt := oldPublishedAt
+	if oldStatus == "draft" && req.Status == "published" && oldPublishedAt.IsZero() {
+		publishedAt = now
+	}
+
+	_, err = db.Exec(`UPDATE articles SET title=?, content=?, excerpt=?, slug=?, category_id=?, status=?, updated_at=?, published_at=? WHERE id=?`,
 		req.Title, req.Content, req.Excerpt, req.Slug, req.CategoryID, req.Status, now, publishedAt, id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -354,6 +364,49 @@ func getArticleTags(c *gin.Context) {
 		tags = append(tags, t)
 	}
 	c.JSON(http.StatusOK, tags)
+}
+
+func getArticleTagsBatch(c *gin.Context) {
+	idsStr := c.Query("ids")
+	if idsStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ids parameter is required"})
+		return
+	}
+
+	idStrings := strings.Split(idsStr, ",")
+	placeholders := strings.Repeat("?,", len(idStrings))
+	placeholders = placeholders[:len(placeholders)-1]
+
+	args := make([]interface{}, len(idStrings))
+	for i, idStr := range idStrings {
+		args[i] = idStr
+	}
+
+	query := `
+		SELECT at.article_id, t.id, t.name, t.slug 
+		FROM tags t 
+		INNER JOIN article_tags at ON t.id = at.tag_id 
+		WHERE at.article_id IN (` + placeholders + `)
+	`
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	result := make(map[int][]Tag)
+	for rows.Next() {
+		var articleID int
+		var t Tag
+		err := rows.Scan(&articleID, &t.ID, &t.Name, &t.Slug)
+		if err != nil {
+			continue
+		}
+		result[articleID] = append(result[articleID], t)
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func getCategories(c *gin.Context) {

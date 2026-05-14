@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import axios from 'axios';
 
 function ArticleDetail() {
   const { slug } = useParams();
+  const navigate = useNavigate();
   const [article, setArticle] = useState(null);
+  const [tags, setTags] = useState([]);
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [replyTo, setReplyTo] = useState(null);
@@ -19,6 +21,7 @@ function ArticleDetail() {
   useEffect(() => {
     if (article?.id) {
       fetchComments();
+      fetchArticleTags();
     }
   }, [article?.id]);
 
@@ -30,6 +33,15 @@ function ArticleDetail() {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchArticleTags = async () => {
+    try {
+      const res = await axios.get(`/api/articles/${article.id}/tags`);
+      setTags(res.data);
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -71,6 +83,20 @@ function ArticleDetail() {
           发布于 {new Date(article.published_at || article.created_at).toLocaleDateString()} · 
           浏览 {article.view_count} 次
         </div>
+        {tags.length > 0 && (
+          <div className="tags" style={{ marginTop: '0.75rem' }}>
+            {tags.map(tag => (
+              <span
+                key={tag.id}
+                className="tag"
+                style={{ cursor: 'pointer' }}
+                onClick={() => navigate(`/?tag_id=${tag.id}`)}
+              >
+                {tag.name}
+              </span>
+            ))}
+          </div>
+        )}
         <hr style={{ margin: '1.5rem 0' }} />
         <div className="markdown-content">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>

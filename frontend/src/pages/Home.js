@@ -1,14 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 
 function Home() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [articles, setArticles] = useState([]);
   const [categories, setCategories] = useState([]);
   const [tags, setTags] = useState([]);
+  const [articleTags, setArticleTags] = useState({});
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedTag, setSelectedTag] = useState('');
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const tagId = searchParams.get('tag_id');
+    const categoryId = searchParams.get('category_id');
+    if (tagId) setSelectedTag(tagId);
+    if (categoryId) setSelectedCategory(categoryId);
+  }, []);
 
   useEffect(() => {
     fetchArticles();
@@ -23,6 +32,12 @@ function Home() {
       if (selectedTag) params.tag_id = selectedTag;
       const res = await axios.get('/api/articles', { params });
       setArticles(res.data);
+      
+      if (res.data.length > 0) {
+        const ids = res.data.map(a => a.id).join(',');
+        const tagsRes = await axios.get('/api/articles/tags/batch', { params: { ids } });
+        setArticleTags(tagsRes.data);
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -111,6 +126,29 @@ function Home() {
                 {new Date(article.created_at).toLocaleDateString()} · 浏览 {article.view_count} 次
               </div>
               <p className="article-excerpt">{article.excerpt || article.content.substring(0, 200)}...</p>
+              {articleTags[article.id] && articleTags[article.id].length > 0 && (
+                <div className="tags" style={{ marginTop: '0.5rem' }}>
+                  {articleTags[article.id].map(tag => (
+                    <Link
+                      key={tag.id}
+                      to={`/?tag_id=${tag.id}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setSelectedTag(tag.id);
+                      }}
+                      style={{
+                        textDecoration: 'none',
+                        padding: '0.25rem 0.6rem',
+                        fontSize: '0.75rem',
+                        backgroundColor: selectedTag === tag.id ? '#667eea' : '#e9ecef',
+                        color: selectedTag === tag.id ? 'white' : '#495057'
+                      }}
+                    >
+                      {tag.name}
+                    </Link>
+                  ))}
+                </div>
+              )}
             </div>
           ))
         )}
